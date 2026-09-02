@@ -74,6 +74,33 @@ async def test_active_dings(auth, mocker):
     await listener.stop()
 
 
+@pytest.mark.parametrize(
+    "missing_field",
+    ["id", "created_at", "subtype"],
+    ids=["missing_id", "missing_created_at", "missing_subtype"],
+)
+async def test_alert_v2_missing_ding_field(auth, mocker, missing_field):
+    """A ding missing required fields is unknown, not an unhandled exception.
+
+    _on_notification runs as the firebase_messaging notification callback,
+    which shuts the push receiver down after three consecutive callback
+    exceptions -- so raising here stops realtime events for every device.
+    """
+    ring = Ring(auth)
+    listener = RingEventListener(ring)
+    await listener.start()
+
+    msg = load_alert_v2("camera_motion", 123456782)
+    data = json.loads(msg["data"]["data"])
+    del data["event"]["ding"][missing_field]
+    msg["data"]["data"] = json.dumps(data)
+
+    listener._on_notification(msg, "1234567")
+
+    assert len(ring.active_alerts()) == 0
+    await listener.stop()
+
+
 async def test_ding_expirey(auth, mocker, freezer: FrozenDateTimeFactory):
     ring = Ring(auth)
     listener = RingEventListener(ring)
