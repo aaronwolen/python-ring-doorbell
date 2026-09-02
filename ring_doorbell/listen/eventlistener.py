@@ -316,22 +316,37 @@ class RingEventListener:
 
         android_config = json.loads(android_config_str)
         data = json.loads(data_str)
+        device = data.get("device", {})
+        ding = data.get("event", {}).get("ding", {})
+        # Some notifications arrive with a `ding` that is missing the fields an
+        # event is built from. Report them as unknown rather than raising: this
+        # runs in the firebase_messaging notification callback, which shuts the
+        # push receiver down after three consecutive callback exceptions,
+        # stopping realtime events for every device until the listener restarts.
+        if (
+            (event_id := ding.get("id")) is None
+            or (created_at := ding.get("created_at")) is None
+            or (state := ding.get("subtype")) is None
+            or (device_id := device.get("id")) is None
+        ):
+            _logger.debug(
+                "Missing event fields in fcm message data.  Full message is:\n%s",
+                json.dumps(msg_data),
+            )
+            return None
+
         event_category = android_config["category"]
         event_kind = PUSH_NOTIFICATION_KINDS.get(event_category, "Unknown")
-        device = data["device"]
-        event = data["event"]
-        event_id = int(event["ding"]["id"])
-        created_at = event["ding"]["created_at"]
         create_seconds = parse_datetime(created_at).timestamp()
         return RingEvent(
-            event_id,
-            device["id"],
+            int(event_id),
+            device_id,
             device_name=device.get("name"),
             device_kind=device.get("kind"),
             kind=event_kind,
             now=create_seconds,
             expires_in=DEFAULT_LISTEN_EVENT_EXPIRES_IN,
-            state=event["ding"]["subtype"],
+            state=state,
         )
 
     def _get_legacy_ring_event(self, gcm_data: dict) -> RingEvent | None:
